@@ -1,0 +1,42 @@
+# 🔹 Ambientes virtuais
+venv/
+.env
+*.env
+
+# 🔹 Arquivos de credenciais e configs locais
+credentials.env
+
+# 🔹 Cache e compilações
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🔹 Logs
+logs/
+*.log
+
+# 🔹 Arquivos temporários do sistema
+.DS_Store
+Thumbs.db
+
+# 🔹 Configs do IDE/Editor
+.vscode/
+.idea/
+
+# 🔹 Arquivos de build
+build/
+dist/
+*.egg-info/
+
+# 🔹 Capturas de tela / imagens de teste
+assets/tmp/
+assets/test_*.png
+
+# 🔹 Dados de execução
+*.sqlite3
+*.db
+
+# 🔹 Arquivos ZIP e backups
+*.zip
+*.bak
+*.old

@@ -1,2 +1,9 @@
+# Automação e controle do Moodle
+pyautogui
+mss
 selenium
 python-dotenv
+
+# Dashboard e visualização
+streamlit
+plotly

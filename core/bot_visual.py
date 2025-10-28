@@ -56,8 +56,11 @@ status_materias = {}
 # ===============================
 
 def obter_caminho_completo(nome_pasta, nome_arquivo=""):
-    """Retorna o caminho completo para uma pasta ou arquivo dentro dela."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    """
+    Retorna o caminho completo para uma pasta ou arquivo dentro da raiz do projeto,
+    mesmo que este arquivo esteja dentro da pasta /core.
+    """
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(base_dir, nome_pasta, nome_arquivo)
 
 def criar_pastas_necessarias():
@@ -126,10 +129,7 @@ def fazer_login_moodle():
         return False
 
 def verificar_pendencia_na_materia(nome_materia):
-    """
-    Entra na página da matéria, rola a tela e procura por trabalhos pendentes.
-    Retorna um dicionário com o status detalhado da matéria.
-    """
+    """Verifica pendências em uma matéria."""
     print(f"\n📘 Verificando a matéria: {nome_materia}")
     url_materia = CONFIGURACOES["materias"][nome_materia]
     webbrowser.open(url_materia)
@@ -170,7 +170,6 @@ def verificar_pendencia_na_materia(nome_materia):
             caminho_pendente = obter_caminho_completo(CONFIGURACOES["pastas"]["assets"], CONFIGURACOES["imagens"]["pendente"])
             pendente_posicao = pyautogui.locateOnScreen(caminho_pendente, region=regiao_para_procurar, confidence=CONFIGURACOES["automacao"]["confianca_imagem"], grayscale=True)
         except pyautogui.ImageNotFoundException:
-            print("   🟣 Status 'Pendente' não encontrado próximo ao trabalho.")
             pendente_posicao = None
 
         if pendente_posicao:
@@ -178,7 +177,6 @@ def verificar_pendencia_na_materia(nome_materia):
             status_materia["pendente"] = True
             caminho_screenshot_pendente = obter_caminho_completo(CONFIGURACOES["pastas"]["screenshots"], f"pendente_{nome_materia}.png")
             captura_tela(caminho_screenshot_pendente)
-            print(f"   📸 Screenshot da pendência salvo em '{caminho_screenshot_pendente}'")
             status_materia["observacao"] = "Trabalho final com status PENDENTE"
         else:
             print("   🟣 Trabalho encontrado, mas o status NÃO é 'Pendente'.")
@@ -203,63 +201,13 @@ def gerar_relatorio_final():
     
     data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     
-    # Coletar matérias com pendências
-    materias_com_pendencia = [materia for materia, status in status_materias.items() if status["pendente"]]
-    materias_sem_trabalho = [materia for materia, status in status_materias.items() if not status["trabalho_encontrado"]]
-    materias_em_dia = [materia for materia, status in status_materias.items() if status["trabalho_encontrado"] and not status["pendente"]]
+    materias_com_pendencia = [m for m, s in status_materias.items() if s["pendente"]]
+    materias_sem_trabalho = [m for m, s in status_materias.items() if not s["trabalho_encontrado"]]
+    materias_em_dia = [m for m, s in status_materias.items() if s["trabalho_encontrado"] and not s["pendente"]]
 
-    # Relatório no console
-    print(f"📅 Relatório gerado em: {data_hora}")
-    print(f"📚 Total de matérias verificadas: {len(status_materias)}")
-    print(f"⚠️  Matérias com pendências: {len(materias_com_pendencia)}")
-    print(f"✅ Matérias em dia: {len(materias_em_dia)}")
-    print(f"🔍 Matérias sem trabalho final: {len(materias_sem_trabalho)}")
-    
-    if materias_com_pendencia:
-        print("\n❌ MATÉRIAS COM PENDÊNCIAS:")
-        for materia in materias_com_pendencia:
-            print(f"   🔸 {materia} - {status_materias[materia]['observacao']}")
-    
-    if materias_em_dia:
-        print("\n✅ MATÉRIAS EM DIA:")
-        for materia in materias_em_dia:
-            print(f"   🟢 {materia} - {status_materias[materia]['observacao']}")
-    
-    if materias_sem_trabalho:
-        print("\n🔍 MATÉRIAS SEM TRABALHO FINAL:")
-        for materia in materias_sem_trabalho:
-            print(f"   🔎 {materia} - {status_materias[materia]['observacao']}")
-
-    print(f"\n📷 Prints das telas salvas na pasta 'screenshots'.")
-
-    # Relatório em arquivo
-    relatorio_texto = "="*50 + "\n"
-    relatorio_texto += "RELATÓRIO DE PENDÊNCIAS - BOT MOODLE\n"
-    relatorio_texto += "="*50 + "\n"
-    relatorio_texto += f"Data e hora: {data_hora}\n"
-    relatorio_texto += f"Total de matérias verificadas: {len(status_materias)}\n"
-    relatorio_texto += f"Matérias com pendências: {len(materias_com_pendencia)}\n"
-    relatorio_texto += f"Matérias em dia: {len(materias_em_dia)}\n"
-    relatorio_texto += f"Matérias sem trabalho final: {len(materias_sem_trabalho)}\n\n"
-    
-    if materias_com_pendencia:
-        relatorio_texto += "MATÉRIAS COM PENDÊNCIAS:\n"
-        for materia in materias_com_pendencia:
-            relatorio_texto += f"❌ {materia} - {status_materias[materia]['observacao']}\n"
-        relatorio_texto += "\n"
-    
-    if materias_em_dia:
-        relatorio_texto += "MATÉRIAS EM DIA:\n"
-        for materia in materias_em_dia:
-            relatorio_texto += f"✅ {materia} - {status_materias[materia]['observacao']}\n"
-        relatorio_texto += "\n"
-    
-    if materias_sem_trabalho:
-        relatorio_texto += "MATÉRIAS SEM TRABALHO FINAL:\n"
-        for materia in materias_sem_trabalho:
-            relatorio_texto += f"🔍 {materia} - {status_materias[materia]['observacao']}\n"
-    
-    relatorio_texto += "\n" + "="*50 + "\n\n"
+    relatorio_texto = "="*50 + "\nRELATÓRIO DE PENDÊNCIAS - BOT MOODLE\n" + "="*50 + "\n"
+    relatorio_texto += f"Data e hora: {data_hora}\nTotal de matérias verificadas: {len(status_materias)}\n"
+    relatorio_texto += f"Matérias com pendências: {len(materias_com_pendencia)}\nMatérias em dia: {len(materias_em_dia)}\nMatérias sem trabalho final: {len(materias_sem_trabalho)}\n\n"
 
     caminho_log = obter_caminho_completo(CONFIGURACOES["pastas"]["logs"], f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
     with open(caminho_log, "w", encoding="utf-8") as f:
@@ -269,29 +217,35 @@ def gerar_relatorio_final():
     print("="*50)
 
 # ===============================
-# 🚀 EXECUÇÃO PRINCIPAL DO SCRIPT
+# 🚀 EXECUÇÃO PRINCIPAL
 # ===============================
 
 if __name__ == "__main__":
     try:
         print("🧠 Iniciando o bot do Moodle — versão com relatório detalhado 🚀\n")
-        
         criar_pastas_necessarias()
-        
         fazer_login_moodle()
-        
-        # Loop principal para verificar cada matéria
         for nome_materia in CONFIGURACOES["materias"].keys():
             status = verificar_pendencia_na_materia(nome_materia)
             status_materias[nome_materia] = status
             voltar_pagina_inicial()
-
         gerar_relatorio_final()
-        
         print("\n🏁 Bot finalizado com sucesso!")
+
+        # 🚀 Abre automaticamente o painel Streamlit após o bot finalizar
+        import subprocess
+        import sys
+
+        try:
+            dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "app.py")
+            print("🌐 Abrindo o painel do Moodle Bot no navegador...")
+            subprocess.Popen([sys.executable, "-m", "streamlit", "run", dashboard_path])
+        except Exception as e:
+            print(f"⚠️ Não foi possível abrir o painel automaticamente: {e}")
+
     except Exception as e:
         print(f"\n❌ Ocorreu um erro inesperado durante a execução do bot: {e}")
-        print("🔍 Tentando gerar um relatório parcial com as informações coletadas até o momento...")
+        print("🔍 Tentando gerar um relatório parcial...")
         try:
             gerar_relatorio_final()
         except Exception as e_rel:

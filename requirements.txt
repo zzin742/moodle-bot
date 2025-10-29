@@ -2,6 +2,7 @@
 pyautogui
 mss
 selenium
+webdriver-manager
 python-dotenv
 
 # Dashboard e visualização

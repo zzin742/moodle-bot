@@ -2,28 +2,32 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 
-import pyautogui
-import time
-import mss
-import mss.tools
-import webbrowser
-from datetime import datetime
 import os
-
-# Desativa a pausa de segurança do pyautogui (use com cuidado)
-pyautogui.FAILSAFE = False
+import time
+import shutil
+from datetime import datetime
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+from dotenv import load_dotenv
 
 # ===============================
-# 📁 CONFIGURAÇÕES GLOBAIS
+# ⚙️ CONFIGURAÇÕES GERAIS
 # ===============================
+load_dotenv()
+
 CONFIGURACOES = {
     "pastas": {
-        "assets": "assets",
+        "logs": "logs",
         "screenshots": "screenshots",
-        "logs": "logs"
     },
     "moodle": {
-        "url_login": "https://moodle.faat.edu.br/moodle/login/index.php",
+        "url_login": os.getenv("MOODLE_URL"),
         "timeout_login": 20
     },
     "materias": {
@@ -32,188 +36,247 @@ CONFIGURACOES = {
         "EngenhariaSoftware": "https://moodle.faat.edu.br/moodle/course/view.php?id=6546",
         "IOT": "https://moodle.faat.edu.br/moodle/course/view.php?id=6547",
         "Programacao": "https://moodle.faat.edu.br/moodle/course/view.php?id=6451"
-    },
-    "automacao": {
-        "confianca_imagem": 0.7,
-        "confianca_trabalho_final": 0.55,
-        "rolagem_por_scroll": -500,
-        "tempo_espera_rolagem": 0.4,
-        "tempo_espera_abertura_pagina": 5,
-        "timeout_esperar_imagem": 10
-    },
-    "imagens": {
-        "botao_acessar": "botao_acessar.png",
-        "trabalho_final": "trabalho_final.png",
-        "pendente": "pendente.png"
     }
 }
 
-# Dicionário para armazenar o status de cada matéria
 status_materias = {}
 
 # ===============================
-# 🛠️ FUNÇÕES DE APOIO E CONFIGURAÇÃO
+# 🧠 FUNÇÕES DE SUPORTE
 # ===============================
 
 def obter_caminho_completo(nome_pasta, nome_arquivo=""):
-    """
-    Retorna o caminho completo para uma pasta ou arquivo dentro da raiz do projeto,
-    mesmo que este arquivo esteja dentro da pasta /core.
-    """
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     return os.path.join(base_dir, nome_pasta, nome_arquivo)
 
-def criar_pastas_necessarias():
-    """Cria as pastas 'assets', 'screenshots' e 'logs' se não existirem."""
-    print("🔧 Verificando e criando pastas necessárias...")
+def criar_pastas():
     for pasta in CONFIGURACOES["pastas"].values():
-        caminho_pasta = obter_caminho_completo(pasta)
-        if not os.path.exists(caminho_pasta):
-            os.makedirs(caminho_pasta)
-            print(f"   📁 Pasta '{caminho_pasta}' criada.")
-    print("✅ Pastas verificadas.\n")
+        os.makedirs(obter_caminho_completo(pasta), exist_ok=True)
 
-def captura_tela(nome_arquivo="debug.png"):
-    """Captura a tela inteira do monitor principal e salva como PNG."""
-    try:
-        with mss.mss() as sct:
-            monitor = sct.monitors[1]
-            sct_img = sct.grab(monitor)
-            mss.tools.to_png(sct_img.rgb, sct_img.size, output=nome_arquivo)
-    except Exception as e:
-        print(f"⚠️ Erro ao capturar a tela: {e}")
-
-def rolar_pagina(total_scrolls=25):
-    """Desce a página lentamente usando a rolagem do mouse."""
-    print(f"📜 Rolando a página {total_scrolls} vezes para carregar todo o conteúdo...")
-    for i in range(total_scrolls):
-        pyautogui.scroll(CONFIGURACOES["automacao"]["rolagem_por_scroll"])
-        time.sleep(CONFIGURACOES["automacao"]["tempo_espera_rolagem"])
-    print("✅ Rolagem concluída.")
-
-def esperar_imagem(caminho_imagem, timeout=10, confianca=0.8):
-    """Espera uma imagem aparecer na tela por um determinado tempo."""
-    print(f"👀 Aguardando a imagem '{os.path.basename(caminho_imagem)}' aparecer (timeout: {timeout}s)...")
-    tempo_inicio = time.time()
-    while time.time() - tempo_inicio < timeout:
-        try:
-            posicao = pyautogui.locateOnScreen(caminho_imagem, confidence=confianca, grayscale=True)
-            if posicao:
-                print(f"   ✅ Imagem '{os.path.basename(caminho_imagem)}' encontrada!")
-                return posicao
-        except pyautogui.ImageNotFoundException:
-            pass
-        time.sleep(0.5)
-    print(f"   ❌ Imagem '{os.path.basename(caminho_imagem)}' NÃO encontrada após {timeout}s.")
-    return None
+def captura_tela(driver, nome_arquivo):
+    """Salva screenshot direto do Selenium."""
+    caminho = obter_caminho_completo(CONFIGURACOES["pastas"]["screenshots"], nome_arquivo)
+    driver.save_screenshot(caminho)
+    print(f"📸 Screenshot salvo em {caminho}")
 
 # ===============================
-# 🎯 LÓGICA PRINCIPAL DO BOT
+# 🌐 LOGIN SELENIUM
 # ===============================
 
-def fazer_login_moodle():
-    """Abre o Moodle, espera a tela de login e clica no botão de acessar."""
-    print("🌐 Abrindo o Moodle no navegador...")
-    webbrowser.open(CONFIGURACOES["moodle"]["url_login"])
-    
-    caminho_botao = obter_caminho_completo(CONFIGURACOES["pastas"]["assets"], CONFIGURACOES["imagens"]["botao_acessar"])
-    botao_acessar = esperar_imagem(caminho_botao, timeout=CONFIGURACOES["moodle"]["timeout_login"], confianca=0.6)
+def iniciar_driver():
+    """Inicia o Chrome com perfil temporário isolado para evitar cache e travamentos."""
+    options = Options()
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-default-browser-check")
 
-    if botao_acessar:
-        pyautogui.click(pyautogui.center(botao_acessar))
-        print("🚀 Botão 'Acessar' clicado. Login em andamento...")
-        time.sleep(CONFIGURACOES["automacao"]["tempo_espera_abertura_pagina"])
-        return True
-    else:
-        print("⚠️ Botão 'Acessar' não encontrado. Verifique se já está logado ou se a página carregou.")
-        return False
+    user_data_dir = os.path.join(os.getcwd(), "chrome_temp_profile")
+    os.makedirs(user_data_dir, exist_ok=True)
+    options.add_argument(f"--user-data-dir={user_data_dir}")
 
-def verificar_pendencia_na_materia(nome_materia):
-    """Verifica pendências em uma matéria."""
-    print(f"\n📘 Verificando a matéria: {nome_materia}")
-    url_materia = CONFIGURACOES["materias"][nome_materia]
-    webbrowser.open(url_materia)
-    time.sleep(CONFIGURACOES["automacao"]["tempo_espera_abertura_pagina"])
+    print(f"🚀 Iniciando Chrome com perfil temporário em: {user_data_dir}")
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.implicitly_wait(5)
+    return driver, user_data_dir
 
-    rolar_pagina()
-    
-    caminho_screenshot = obter_caminho_completo(CONFIGURACOES["pastas"]["screenshots"], f"tela_{nome_materia}.png")
-    captura_tela(caminho_screenshot)
-
-    status_materia = {
-        "nome": nome_materia,
-        "trabalho_encontrado": False,
-        "pendente": False,
-        "observacao": ""
-    }
-
-    try:
-        caminho_trabalho = obter_caminho_completo(CONFIGURACOES["pastas"]["assets"], CONFIGURACOES["imagens"]["trabalho_final"])
-        trabalho_posicao = pyautogui.locateOnScreen(caminho_trabalho, confidence=CONFIGURACOES["automacao"]["confianca_trabalho_final"], grayscale=True)
-    except pyautogui.ImageNotFoundException:
-        print(f"   ⚠️ Imagem 'trabalho_final.png' não foi encontrada na tela de {nome_materia}.")
-        trabalho_posicao = None
-        status_materia["observacao"] = "Trabalho final não encontrado"
-
-    if trabalho_posicao:
-        print("   📘 'Trabalho Final' encontrado. Verificando status...")
-        status_materia["trabalho_encontrado"] = True
-        
-        regiao_para_procurar = (
-            trabalho_posicao.left + trabalho_posicao.width,
-            trabalho_posicao.top - 20,
-            300,
-            trabalho_posicao.height + 40
-        )
-        
-        try:
-            caminho_pendente = obter_caminho_completo(CONFIGURACOES["pastas"]["assets"], CONFIGURACOES["imagens"]["pendente"])
-            pendente_posicao = pyautogui.locateOnScreen(caminho_pendente, region=regiao_para_procurar, confidence=CONFIGURACOES["automacao"]["confianca_imagem"], grayscale=True)
-        except pyautogui.ImageNotFoundException:
-            pendente_posicao = None
-
-        if pendente_posicao:
-            print("   🟢 Status 'Pendente' encontrado!")
-            status_materia["pendente"] = True
-            caminho_screenshot_pendente = obter_caminho_completo(CONFIGURACOES["pastas"]["screenshots"], f"pendente_{nome_materia}.png")
-            captura_tela(caminho_screenshot_pendente)
-            status_materia["observacao"] = "Trabalho final com status PENDENTE"
-        else:
-            print("   🟣 Trabalho encontrado, mas o status NÃO é 'Pendente'.")
-            status_materia["observacao"] = "Trabalho final encontrado, mas sem pendência"
-    else:
-        print(f"   ✅ Nenhum 'Trabalho Final' encontrado para {nome_materia}.")
-        status_materia["observacao"] = "Nenhum trabalho final encontrado"
-
-    return status_materia
-
-def voltar_pagina_inicial():
-    """Volta para a página anterior usando o atalho do navegador."""
-    print("↩️ Voltando para a página anterior...")
-    pyautogui.hotkey('alt', 'left')
+def fazer_login(driver):
+    print("🌐 Acessando página de login do Moodle...")
+    driver.get(CONFIGURACOES["moodle"]["url_login"])
     time.sleep(3)
 
-def gerar_relatorio_final():
-    """Gera e salva o relatório final das pendências no console e em um arquivo."""
+    usuario = os.getenv("MOODLE_USER")
+    senha = os.getenv("MOODLE_PASS")
+
+    if not usuario or not senha:
+        print("❌ Credenciais não encontradas no arquivo .env.")
+        return False
+
+    try:
+        campo_user = driver.find_element(By.ID, "username")
+        campo_pass = driver.find_element(By.ID, "password")
+        botao_login = driver.find_element(By.ID, "loginbtn")
+
+        campo_user.send_keys(usuario)
+        campo_pass.send_keys(senha)
+        botao_login.click()
+
+        WebDriverWait(driver, 15).until(
+            EC.any_of(
+                EC.url_contains("dashboard"),
+                EC.url_contains("my")
+            )
+        )
+
+        print("✅ Login realizado com sucesso!")
+        return True
+    except Exception as e:
+        print(f"⚠️ Aviso: possível problema no login ({e}) — continuando mesmo assim.")
+        return True
+
+# ===============================
+# 🔍 VERIFICAR PENDÊNCIAS REAIS (ROBUSTO)
+# ===============================
+
+def _safe_text(el):
+    """Retorna o texto em minúsculas de um elemento (ou '' se None)."""
+    if el is None:
+        return ""
+    try:
+        return el.get_text(" ", strip=True).lower()
+    except Exception:
+        return ""
+
+def _has_any(text, keywords):
+    """True se qualquer palavra-chave aparece no texto (case-insensitive)."""
+    t = (text or "").lower()
+    return any(k.lower() in t for k in keywords)
+
+def verificar_materia(driver, nome_materia, url_materia):
+    """
+    Abre a matéria, rola toda a página, captura screenshot e
+    detecta pendências olhando títulos e badges/labels de status.
+    Evita lambdas de class_ que geravam NoneType errors.
+    """
+    print(f"\n📘 Verificando matéria: {nome_materia}")
+    status = {"trabalho_encontrado": False, "pendente": False, "observacao": ""}
+
+    try:
+        driver.get(url_materia)
+
+        # Espera um contêiner típico de conteúdo do curso
+        try:
+            WebDriverWait(driver, 12).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, ".course-content, #region-main, .format-tiles, .format-topics")
+                )
+            )
+        except Exception:
+            # Segue mesmo assim; alguns temas demoram a sinalizar
+            pass
+
+        # Rola até o fim para carregar todo conteúdo dinâmico
+        last_h = driver.execute_script("return document.body.scrollHeight")
+        for _ in range(20):
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1.1)
+            new_h = driver.execute_script("return document.body.scrollHeight")
+            if new_h == last_h:
+                break
+            last_h = new_h
+
+        # Volta pro topo (print mais útil)
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(0.3)
+
+        # Screenshot final da página já carregada
+        caminho_png = f"tela_{nome_materia}.png"
+        captura_tela(driver, caminho_png)
+
+        # Parse seguro
+        html = driver.page_source
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Seleciona atividades de forma previsível (sem lambda no class_)
+        atividades = soup.select("li.activity, div.activity")
+        if not atividades:
+            # Alternativas comuns de temas
+            atividades = soup.select(".activityinstance, .assign, .modtype_assign, .activityitem")
+
+        if not atividades:
+            status["observacao"] = "Nenhuma atividade detectada"
+            print(f"🔍 {nome_materia}: sem atividades visíveis.")
+            return status
+
+        pendentes = 0
+        entregues = 0
+        vistos = 0
+
+        # Palavras-chave de status (ajuste conforme seu tema)
+        KW_PENDENTE = ["pendente", "não enviado", "nao enviado", "não entregue", "nao entregue", "aguardando envio", "não enviado ainda", "atrasado"]
+        KW_ENTREGUE = ["enviado", "entregue", "concluído", "concluido", "em dia", "feito", "submetido", "enviada"]
+
+        for bloco in atividades:
+            vistos += 1
+
+            # Texto amplo do bloco
+            texto = _safe_text(bloco)
+
+            # Coleta badges/status labels comuns em vários temas
+            badges = []
+            for sel in [".badge", ".badge-status", ".status", ".submissionstatus", ".label", ".activity-status"]:
+                for b in bloco.select(sel):
+                    t = _safe_text(b)
+                    if t:
+                        badges.append(t)
+
+            texto_status = " ".join(filter(None, [texto] + badges)).lower()
+
+            if _has_any(texto_status, KW_PENDENTE):
+                pendentes += 1
+            elif _has_any(texto_status, KW_ENTREGUE):
+                entregues += 1
+            else:
+                # Heurísticas por classes conhecidas (sem 'in None')
+                cls = bloco.get("class") or []
+                cls_join = " ".join(cls).lower()
+                if _has_any(cls_join, ["notattempted", "submissionnotgraded", "overdue"]):
+                    pendentes += 1
+                elif _has_any(cls_join, ["completed", "submissionstatussubmitted", "submitted"]):
+                    entregues += 1
+
+        if pendentes > 0:
+            status.update({
+                "trabalho_encontrado": True,
+                "pendente": True,
+                "observacao": f"{pendentes} pendência(s) detectada(s) em {vistos} atividade(s) visível(is)"
+            })
+            print(f"❌ {nome_materia}: {pendentes} pendência(s) ({vistos} atividades analisadas).")
+        elif entregues > 0:
+            status.update({
+                "trabalho_encontrado": True,
+                "pendente": False,
+                "observacao": f"{entregues} tarefa(s) entregue(s) em {vistos} atividade(s)"
+            })
+            print(f"✅ {nome_materia}: em dia ({entregues} entregues, {vistos} atividades).")
+        else:
+            status["observacao"] = f"Sem status identificado (analisadas {vistos} atividades)"
+            print(f"🟣 {nome_materia}: sem status claro ({vistos} atividades).")
+
+        return status
+
+    except Exception as e:
+        print(f"❌ Erro ao processar {nome_materia}: {e}")
+        status["observacao"] = f"Erro ({e})"
+        return status
+
+
+# ===============================
+# 📊 RELATÓRIO FINAL
+# ===============================
+
+def gerar_relatorio():
+    caminho_log = obter_caminho_completo("logs", f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
     print("\n" + "="*50)
     print("📊 RELATÓRIO FINAL DE PENDÊNCIAS")
     print("="*50)
-    
-    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    
-    materias_com_pendencia = [m for m, s in status_materias.items() if s["pendente"]]
-    materias_sem_trabalho = [m for m, s in status_materias.items() if not s["trabalho_encontrado"]]
-    materias_em_dia = [m for m, s in status_materias.items() if s["trabalho_encontrado"] and not s["pendente"]]
+    print(f"📅 Gerado em: {data_hora}")
+    print(f"📚 Total de matérias verificadas: {len(status_materias)}")
 
-    relatorio_texto = "="*50 + "\nRELATÓRIO DE PENDÊNCIAS - BOT MOODLE\n" + "="*50 + "\n"
-    relatorio_texto += f"Data e hora: {data_hora}\nTotal de matérias verificadas: {len(status_materias)}\n"
-    relatorio_texto += f"Matérias com pendências: {len(materias_com_pendencia)}\nMatérias em dia: {len(materias_em_dia)}\nMatérias sem trabalho final: {len(materias_sem_trabalho)}\n\n"
-
-    caminho_log = obter_caminho_completo(CONFIGURACOES["pastas"]["logs"], f"relatorio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
     with open(caminho_log, "w", encoding="utf-8") as f:
-        f.write(relatorio_texto)
-    
-    print(f"📁 Relatório salvo em: '{caminho_log}'")
+        f.write(f"RELATÓRIO MOODLE BOT - {data_hora}\n")
+        f.write("="*60 + "\n")
+        for m, s in status_materias.items():
+            simbolo = "❌" if s["pendente"] else "✅" if s["trabalho_encontrado"] else "🔍"
+            f.write(f"{simbolo} {m} - {s['observacao']}\n")
+
+    print(f"📁 Relatório salvo em: {caminho_log}")
     print("="*50)
 
 # ===============================
@@ -221,33 +284,25 @@ def gerar_relatorio_final():
 # ===============================
 
 if __name__ == "__main__":
+    criar_pastas()
+    driver, profile_path = iniciar_driver()
+
     try:
-        print("🧠 Iniciando o bot do Moodle — versão com relatório detalhado 🚀\n")
-        criar_pastas_necessarias()
-        fazer_login_moodle()
-        for nome_materia in CONFIGURACOES["materias"].keys():
-            status = verificar_pendencia_na_materia(nome_materia)
-            status_materias[nome_materia] = status
-            voltar_pagina_inicial()
-        gerar_relatorio_final()
+        if not fazer_login(driver):
+            print("❌ Falha no login. Encerrando.")
+            driver.quit()
+            exit()
+
+        for nome, url in CONFIGURACOES["materias"].items():
+            status_materias[nome] = verificar_materia(driver, nome, url)
+
+        gerar_relatorio()
         print("\n🏁 Bot finalizado com sucesso!")
 
-        # 🚀 Abre automaticamente o painel Streamlit após o bot finalizar
-        import subprocess
-        import sys
-
-        try:
-            dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "app.py")
-            print("🌐 Abrindo o painel do Moodle Bot no navegador...")
-            subprocess.Popen([sys.executable, "-m", "streamlit", "run", dashboard_path])
-        except Exception as e:
-            print(f"⚠️ Não foi possível abrir o painel automaticamente: {e}")
-
-    except Exception as e:
-        print(f"\n❌ Ocorreu um erro inesperado durante a execução do bot: {e}")
-        print("🔍 Tentando gerar um relatório parcial...")
-        try:
-            gerar_relatorio_final()
-        except Exception as e_rel:
-            print(f"❌ Não foi possível gerar o relatório: {e_rel}")
-        print("🏁 Bot finalizado com erros.")
+    finally:
+        driver.quit()
+        if os.path.exists(profile_path):
+            shutil.rmtree(profile_path, ignore_errors=True)
+            print("🧹 Perfil temporário do Chrome removido.")
+        print("\n📊 Para abrir o painel:")
+        print("   python -m streamlit run dashboard/app.py")
